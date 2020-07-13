@@ -1,6 +1,6 @@
 #################
 # EMR catchment and selection bias
-# Citation: Goldstein ND, Kahal D, Testa K, Burstyn I. Catchment and selection bias in an outpatient electronic medical record study of community deprivation and chronic Hepatitis C virus infection. Manuscript in preparation.
+# Citation: Goldstein ND, Kahal D, Testa K, Burstyn I. Inverse probability weighting for selection bias in a Delaware community health center electronic medical record study of community deprivation and hepatitis C prevalence. Manuscript in preparation.
 # 4/3/19 -- Neal Goldstein
 #################
 
@@ -292,11 +292,14 @@ retro_ncc$IPW = ifelse(retro_ncc$IPW > IPW_quantile[2], IPW_quantile[2], retro_n
 ### EXPLORATORY ANALYSES ###
 
 #general characteristics
+nrow(retro)
+nrow(retro_ncc)
 describe(retro_ncc$last_visit_age); IQR(retro_ncc$last_visit_age)
 CrossTable(retro_ncc$sex)
 CrossTable(retro_ncc$race_2cat)
 CrossTable(retro_ncc$ethnicity)
 CrossTable(retro_ncc$insurance_2cat)
+CrossTable(retro_ncc$clinic)
 describe(retro_ncc$n_visits); IQR(retro_ncc$n_visits)
 describe(retro_ncc$days_since_last_visit); IQR(retro_ncc$days_since_last_visit)
 CrossTable(retro_ncc$hepc)
@@ -375,8 +378,8 @@ for (i in 1:nrow(zcta_estimates)) {
 }
 rm(i)
 
-#prevalance of HCV by zip code
-boxplot(zcta_estimates$prevalence) #one notable outlier: 19938
+#prevalence of HCV by zip code
+boxplot(zcta_estimates$prevalence) #one potential outlier: 19938
 boxplot(zcta_estimates$prevalence[zcta_estimates$zcta!=19938])
 
 #insurance by zip code
@@ -398,7 +401,7 @@ abline(lm(zcta_estimates$prevalence ~ zcta_estimates$adi))
 plot(zcta_estimates$adi[zcta_estimates$zcta!=19938], zcta_estimates$prevalence[zcta_estimates$zcta!=19938])
 abline(lm(zcta_estimates$prevalence[zcta_estimates$zcta!=19938] ~ zcta_estimates$adi[zcta_estimates$zcta!=19938]))
 
-#weighted prevalance
+#weighted prevalence
 zcta_estimates$prevalence_weighted = sum(zcta_estimates$prevalence)*zcta_estimates$prevalence*zcta_estimates$median_ipw/sum(zcta_estimates$median_ipw,na.rm=T)
 
 #weighted
@@ -417,19 +420,19 @@ abline(lm(zcta_estimates$prevalence ~ zcta_estimates$median_ipw))
 plot(zcta_estimates$median_ipw[zcta_estimates$zcta!=19938], zcta_estimates$prevalence[zcta_estimates$zcta!=19938])
 abline(lm(zcta_estimates$prevalence[zcta_estimates$zcta!=19938] ~ zcta_estimates$median_ipw[zcta_estimates$zcta!=19938]))
 
-#plot of ADI vs prevalance HCV with selection probabities w/outlier removed
+#plot of ADI vs prevalence HCV with selection probabities w/outlier removed
 # par(xpd=T)
-# plot(zcta_estimates$adi, zcta_estimates$prevalence, cex=, xlab="ZIP code ADI", ylab="Observed prevalance of HCV (%)", xlim=c(-2,3), ylim=c(0,4))
+# plot(zcta_estimates$adi, zcta_estimates$prevalence, cex=, xlab="ZIP code ADI", ylab="Observed prevalence of HCV (%)", xlim=c(-2,3), ylim=c(0,4))
 # legend(x=-1.7,y=5.5, legend=c("  1", "  1-1.2", "1.2-2.2     ", "  >2.2"), pch=1, pt.cex=, x.intersp=2, bty="n", cex=0.9, title="IPW", horiz=T)
 # legend(x=-1,y=4.7, legend=c("Unweighted","Weighted"), lty=c(1,2), bty="n", cex=0.9, horiz=T)
 # par(xpd=F)
 # abline(lm(zcta_estimates$prevalence[zcta_estimates$zcta!=19938] ~ zcta_estimates$adi[zcta_estimates$zcta!=19938]), lty=1)
 # abline(lm(zcta_estimates$prevalence_weighted[zcta_estimates$zcta!=19938] ~ zcta_estimates$adi[zcta_estimates$zcta!=19938]), lty=2)
 
-#plot of ADI vs prevalence HCV with distance w/outlier removed
+#plot of ADI vs prevalence HCV with distance w/outlier removed: Figure 2C
 zcta_estimates$bubble_size  = as.integer(cut(zcta_estimates$median_distance, quantile(zcta_estimates$median_distance, na.rm=T), include.lowest=TRUE))
 zcta_estimates$bubble_size = ifelse(zcta_estimates$bubble_size==1, 0.7, ifelse(zcta_estimates$bubble_size==2, 1.2, ifelse(zcta_estimates$bubble_size==3, 2.8, zcta_estimates$bubble_size)))
-plot(zcta_estimates$adi, zcta_estimates$prevalence, cex=zcta_estimates$bubble_size, xlab="ZIP code ADI", ylab="Observed prevalance of HCV (%)", xlim=c(-2,3), ylim=c(0,4))
+plot(zcta_estimates$adi, zcta_estimates$prevalence, cex=zcta_estimates$bubble_size, xlab="ZIP code ADI", ylab="Observed prevalence of HCV (%)", xlim=c(-2,3), ylim=c(0,4))
 abline(lm(zcta_estimates$prevalence[zcta_estimates$zcta!=19938] ~ zcta_estimates$adi[zcta_estimates$zcta!=19938]), lty=2)
 par(xpd=T)
 legend(x=-1.2,y=5.0, legend=c("<4", "4 to 6", "6 to 12   ", " >12"), pch=1, pt.cex=c(0.7,1.2,2.8,4), cex=0.9, title="Distance to FQHC (mi)", horiz=T)
@@ -444,17 +447,19 @@ confint(glm(hepc ~ census_NDI, data=subset(retro_ncc,CA_distance_75per==0), fami
 summary(glm(hepc ~ census_NDI, data=subset(retro_ncc,CA_distance_75per==1), family=binomial()))
 confint(glm(hepc ~ census_NDI, data=subset(retro_ncc,CA_distance_75per==1), family=binomial()))
 
-#distance vs prevalence w/outlier removed
-plot(zcta_estimates$median_distance, zcta_estimates$prevalence, xlab="Distance to FQHC (mi)", ylab="Observed prevalance of HCV (%)", ylim=c(0,4), pch=16)
+#distance vs prevalence w/outlier removed: Figure 2A
+plot(zcta_estimates$median_distance, zcta_estimates$prevalence, xlab="Distance to FQHC (mi)", ylab="Observed prevalence of HCV (%)", ylim=c(0,4), pch=16)
 abline(lm(zcta_estimates$prevalence[zcta_estimates$zcta!=19938] ~ zcta_estimates$median_distance[zcta_estimates$zcta!=19938]), lty=2)
 summary(glm(hepc ~ distance_to_clinic, data=retro_ncc, family=binomial()))
 confint(glm(hepc ~ distance_to_clinic, data=retro_ncc, family=binomial()))
 
-#distance vs ADI w/outlier removed
+#distance vs ADI w/outlier removed: Figure 2B
 plot(zcta_estimates$median_distance, zcta_estimates$adi, xlab="Distance to FQHC (mi)", ylab="ZIP code ADI", pch=16)
 abline(lm(zcta_estimates$adi[zcta_estimates$zcta!=19938] ~ zcta_estimates$median_distance[zcta_estimates$zcta!=19938]), lty=2)
 summary(lm(census_NDI ~ distance_to_clinic, data=retro_ncc))
 confint(lm(census_NDI ~ distance_to_clinic, data=retro_ncc))
+
+#note: running influence.measures() on the three ecological models in Figure 2 corroborates that 19938 has excessive influences on the data
 
 
 ### EXAMPLE ANALYSIS: NAIVE and IPW ###
