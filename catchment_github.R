@@ -13,6 +13,7 @@ library(maptools) #maptools provides the spatial recognition
 library(lme4) #mixed effects modeling, dichotomous
 library(blme) #bayesian nonlinear mixed effects (bglmer)
 library(RColorBrewer)
+library(boot) #bootstrapping for IPW CIs
 
 
 ### READ DATA ###
@@ -240,6 +241,10 @@ retro_ncc$CA_distance_75per[retro_ncc$clinic=="NE"] = ifelse(retro_ncc$distance_
 retro_ncc$CA_distance_80per[retro_ncc$clinic=="NE"] = ifelse(retro_ncc$distance_to_clinic[retro_ncc$clinic=="NE"]<=quantile(retro_ncc$distance_to_clinic[retro_ncc$clinic=="NE"], probs=0.80, na.rm=T), 1, 0)
 retro_ncc$CA_distance_90per[retro_ncc$clinic=="NE"] = ifelse(retro_ncc$distance_to_clinic[retro_ncc$clinic=="NE"]<=quantile(retro_ncc$distance_to_clinic[retro_ncc$clinic=="NE"], probs=0.90, na.rm=T), 1, 0)
 
+max(retro_ncc$distance_to_clinic[retro_ncc$CA_distance_75per==1])
+max(retro_ncc$distance_to_clinic[retro_ncc$CA_distance_80per==1])
+max(retro_ncc$distance_to_clinic[retro_ncc$CA_distance_90per==1])
+
 #Poisson model of spatial scan statistic (SaTScan analysis)
 cluster_zip = c("19801","19802","19806","19805","19809","19804","19710","19706","19731","19733","19720")
 retro_ncc$CA_poisson = ifelse(retro_ncc$zcta %in% cluster_zip, 1, 0)
@@ -279,14 +284,20 @@ exp(fixef(model))
 exp(confint.merMod(model, method="Wald"))
 
 #PS: probablity of being in catchment (ie propensity score)
-#IPW: (1 / PS) for use as inverse probablity weighting for selection bias correction
-retro_ncc$PS[complete.cases(retro_ncc[,c("CA_distance_90per","zcta","race_2cat","ethnicity","insurance_2cat","n_visits","bus_stops")])] = predict(model, type="response")
-retro_ncc$IPW = 1/retro_ncc$PS
+#IPW: weighting for selection bias correction; see https://doi.org/10.1177%2F2167696815621645
+#note: be sure to update catchment variables in these code depending on CA model
+retro_ncc$PS[complete.cases(retro_ncc[,c("CA_distance_75per","zcta","race_2cat","ethnicity","insurance_2cat","n_visits","bus_stops")])] = predict(model, type="response")
+retro_ncc$IPW = ifelse(retro_ncc$CA_distance_75per==1, 1/retro_ncc$PS, 1/(1-retro_ncc$PS))
+retro_ncc$IPW_stabilized = ifelse(retro_ncc$CA_distance_75per==1, mean(retro_ncc$CA_distance_75per)/retro_ncc$PS, (1-mean(retro_ncc$CA_distance_75per))/(1-retro_ncc$PS))
 
-#cap extreme weights by 2nd and 98th percentiles
+#cap extreme weights by 2nd and 98th percentiles for sensitivity analysis
 IPW_quantile = as.numeric(quantile(retro_ncc$IPW,c(.02,.98), na.rm=T))
-retro_ncc$IPW = ifelse(retro_ncc$IPW < IPW_quantile[1], IPW_quantile[1], retro_ncc$IPW)
-retro_ncc$IPW = ifelse(retro_ncc$IPW > IPW_quantile[2], IPW_quantile[2], retro_ncc$IPW)
+retro_ncc$IPW_trimmed = ifelse(retro_ncc$IPW < IPW_quantile[1], IPW_quantile[1], retro_ncc$IPW)
+retro_ncc$IPW_trimmed = ifelse(retro_ncc$IPW > IPW_quantile[2], IPW_quantile[2], retro_ncc$IPW)
+IPW_quantile = as.numeric(quantile(retro_ncc$IPW_stabilized,c(.02,.98), na.rm=T))
+retro_ncc$IPW_stabilized_trimmed = ifelse(retro_ncc$IPW_stabilized < IPW_quantile[1], IPW_quantile[1], retro_ncc$IPW_stabilized)
+retro_ncc$IPW_stabilized_trimmed = ifelse(retro_ncc$IPW_stabilized > IPW_quantile[2], IPW_quantile[2], retro_ncc$IPW_stabilized)
+rm(IPW_quantile)
 
 
 ### EXPLORATORY ANALYSES ###
@@ -307,7 +318,49 @@ describe(retro_ncc$distance_to_clinic); IQR(retro_ncc$distance_to_clinic)
 describe(retro_ncc$bus_stops_density); IQR(retro_ncc$bus_stops_density)
 describe(retro_ncc$census_NDI)
 
-#prevalance by distance thresholds
+sum(retro_ncc$CA_distance_75per==1)
+describe(retro_ncc$last_visit_age[retro_ncc$CA_distance_75per==1]); IQR(retro_ncc$last_visit_age[retro_ncc$CA_distance_75per==1])
+CrossTable(retro_ncc$sex[retro_ncc$CA_distance_75per==1])
+CrossTable(retro_ncc$race_2cat[retro_ncc$CA_distance_75per==1])
+CrossTable(retro_ncc$ethnicity[retro_ncc$CA_distance_75per==1])
+CrossTable(retro_ncc$insurance_2cat[retro_ncc$CA_distance_75per==1])
+CrossTable(retro_ncc$clinic[retro_ncc$CA_distance_75per==1])
+describe(retro_ncc$n_visits[retro_ncc$CA_distance_75per==1]); IQR(retro_ncc$n_visits[retro_ncc$CA_distance_75per==1])
+describe(retro_ncc$days_since_last_visit[retro_ncc$CA_distance_75per==1]); IQR(retro_ncc$days_since_last_visit[retro_ncc$CA_distance_75per==1])
+CrossTable(retro_ncc$hepc[retro_ncc$CA_distance_75per==1])
+describe(retro_ncc$distance_to_clinic[retro_ncc$CA_distance_75per==1]); IQR(retro_ncc$distance_to_clinic[retro_ncc$CA_distance_75per==1])
+describe(retro_ncc$bus_stops_density[retro_ncc$CA_distance_75per==1]); IQR(retro_ncc$bus_stops_density[retro_ncc$CA_distance_75per==1])
+describe(retro_ncc$census_NDI[retro_ncc$CA_distance_75per==1])
+
+sum(retro_ncc$CA_distance_80per==1)
+describe(retro_ncc$last_visit_age[retro_ncc$CA_distance_80per==1]); IQR(retro_ncc$last_visit_age[retro_ncc$CA_distance_80per==1])
+CrossTable(retro_ncc$sex[retro_ncc$CA_distance_80per==1])
+CrossTable(retro_ncc$race_2cat[retro_ncc$CA_distance_80per==1])
+CrossTable(retro_ncc$ethnicity[retro_ncc$CA_distance_80per==1])
+CrossTable(retro_ncc$insurance_2cat[retro_ncc$CA_distance_80per==1])
+CrossTable(retro_ncc$clinic[retro_ncc$CA_distance_80per==1])
+describe(retro_ncc$n_visits[retro_ncc$CA_distance_80per==1]); IQR(retro_ncc$n_visits[retro_ncc$CA_distance_80per==1])
+describe(retro_ncc$days_since_last_visit[retro_ncc$CA_distance_80per==1]); IQR(retro_ncc$days_since_last_visit[retro_ncc$CA_distance_80per==1])
+CrossTable(retro_ncc$hepc[retro_ncc$CA_distance_80per==1])
+describe(retro_ncc$distance_to_clinic[retro_ncc$CA_distance_80per==1]); IQR(retro_ncc$distance_to_clinic[retro_ncc$CA_distance_80per==1])
+describe(retro_ncc$bus_stops_density[retro_ncc$CA_distance_80per==1]); IQR(retro_ncc$bus_stops_density[retro_ncc$CA_distance_80per==1])
+describe(retro_ncc$census_NDI[retro_ncc$CA_distance_80per==1])
+
+sum(retro_ncc$CA_distance_90per==1)
+describe(retro_ncc$last_visit_age[retro_ncc$CA_distance_90per==1]); IQR(retro_ncc$last_visit_age[retro_ncc$CA_distance_90per==1])
+CrossTable(retro_ncc$sex[retro_ncc$CA_distance_90per==1])
+CrossTable(retro_ncc$race_2cat[retro_ncc$CA_distance_90per==1])
+CrossTable(retro_ncc$ethnicity[retro_ncc$CA_distance_90per==1])
+CrossTable(retro_ncc$insurance_2cat[retro_ncc$CA_distance_90per==1])
+CrossTable(retro_ncc$clinic[retro_ncc$CA_distance_90per==1])
+describe(retro_ncc$n_visits[retro_ncc$CA_distance_90per==1]); IQR(retro_ncc$n_visits[retro_ncc$CA_distance_90per==1])
+describe(retro_ncc$days_since_last_visit[retro_ncc$CA_distance_90per==1]); IQR(retro_ncc$days_since_last_visit[retro_ncc$CA_distance_90per==1])
+CrossTable(retro_ncc$hepc[retro_ncc$CA_distance_90per==1])
+describe(retro_ncc$distance_to_clinic[retro_ncc$CA_distance_90per==1]); IQR(retro_ncc$distance_to_clinic[retro_ncc$CA_distance_90per==1])
+describe(retro_ncc$bus_stops_density[retro_ncc$CA_distance_90per==1]); IQR(retro_ncc$bus_stops_density[retro_ncc$CA_distance_90per==1])
+describe(retro_ncc$census_NDI[retro_ncc$CA_distance_90per==1])
+
+#prevalence by distance thresholds
 CrossTable(retro_ncc$hepc, retro_ncc$CA_distance_75per, prop.r=F, prop.t=F, prop.chisq=F, chisq=T)
 CrossTable(retro_ncc$hepc, retro_ncc$CA_distance_80per, prop.r=F, prop.t=F, prop.chisq=F, chisq=T)
 CrossTable(retro_ncc$hepc, retro_ncc$CA_distance_90per, prop.r=F, prop.t=F, prop.chisq=F, chisq=T)
@@ -330,7 +383,7 @@ rm(i)
 describe(prev_below)
 describe(prev_at_or_above)
 
-plot(prev_below, type="l", ylim=c(0,2), ylab="HCV prevalance", xlab="IPW percentile (below/above)", xaxt="n", lwd=3, col=gray.colors(2)[1])
+plot(prev_below, type="l", ylim=c(0,2), ylab="HCV prevalence", xlab="IPW percentile (below/above)", xaxt="n", lwd=3, col=gray.colors(2)[1])
 axis(side=1, at=seq(2,(length(uniqueIPW)+10), by=length(uniqueIPW)/5), labels=c("0/100","20/80","40/60","60/40","80/20","100/0"))
 lines(rev(prev_at_or_above), type="l", lwd=3, col=gray.colors(2)[2])
 legend("top", legend=c("Below","Above"), lwd=3, col=gray.colors(2), horiz=T)
@@ -505,12 +558,29 @@ exp(0.95*sqrt(as.numeric(print(VarCorr(model),comp="Variance"))))
 #fully adjusted naive model
 model = bglmer(hepc ~ (1 | zcta) + scale(last_visit_age) + as.factor(sex) + as.factor(race_2cat) + as.factor(insurance_2cat) + census_NDI, family=binomial(), data=retro_ncc, control=glmerControl(optimizer="bobyqa"), fixef.prior=normal)
 
-#fully adjusted IPW model
-model = bglmer(hepc ~ (1 | zcta) + scale(last_visit_age) + as.factor(sex) + as.factor(race_2cat) + as.factor(insurance_2cat) + census_NDI, family=binomial(), data=retro_ncc, weights=IPW, control=glmerControl(optimizer="bobyqa"), fixef.prior=normal)
-
 summary(model)
 exp(fixef(model))
 exp(confint.merMod(model, method="Wald"))
+
+#fully adjusted IPW model
+model = bglmer(hepc ~ (1 | zcta) + scale(last_visit_age) + as.factor(sex) + as.factor(race_2cat) + as.factor(insurance_2cat) + census_NDI, family=binomial(), data=retro_ncc, weights=IPW_stabilized, control=glmerControl(optimizer="bobyqa"), fixef.prior=normal)
+
+summary(model)
+exp(fixef(model))
+
+#bootstrap for fixed effect CIs since IPW; adapted from https://cran.r-project.org/web/packages/ipw/ipw.pdf (p9)
+boot.fun = function(dat, index){
+  exp(fixef(bglmer(hepc ~ (1 | zcta) + scale(last_visit_age) + as.factor(sex) + as.factor(race_2cat) + as.factor(insurance_2cat) + census_NDI, family=binomial(), data=dat[index, ], weights=IPW_stabilized, control=glmerControl(optimizer="bobyqa"), fixef.prior=normal)))
+}
+
+bootres = boot(retro_ncc, boot.fun, 1000, parallel="multicore", ncpus=6)
+boot.ci(bootres, type = "basic", t0=bootres$t0[1], t=bootres$t[,1]) #intercept
+boot.ci(bootres, type = "basic", t0=bootres$t0[2], t=bootres$t[,2]) #age
+boot.ci(bootres, type = "basic", t0=bootres$t0[3], t=bootres$t[,3]) #sex
+boot.ci(bootres, type = "basic", t0=bootres$t0[4], t=bootres$t[,4]) #race
+boot.ci(bootres, type = "basic", t0=bootres$t0[5], t=bootres$t[,5]) #insurance
+boot.ci(bootres, type = "basic", t0=bootres$t0[6], t=bootres$t[,6]) #adi
+
 # 
 # #plot of ADI vs HCV with selection probabities from naive model
 # retro_ncc$hepc_pred[complete.cases(retro_ncc[,c("zcta","last_visit_age","sex","race_2cat","insurance_2cat","census_NDI")])] = predict(model, type="response")
